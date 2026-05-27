@@ -8,8 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { MediaPipeService } from './mediapipe.service';
-import { LlmInterpreterService } from './llm-interpreter.service';
+import { GestureRecognizerService } from './gesture-recognizer.service';
 import { DEFAULT_VIDEO, GESTURE_CONFIG } from './gesture-config';
 import { VideoPlayerComponent } from './video-player/video-player';
 
@@ -25,26 +24,24 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
 
   currentVideoSrc = signal(DEFAULT_VIDEO);
   isDefaultVideo = signal(true);
+  detectedGesture = signal<string>('—');
   cameraError = signal<string | null>(null);
   isLoading = signal(true);
 
   private subscription?: Subscription;
 
-  constructor(
-    private mediapipe: MediaPipeService,
-    private llm: LlmInterpreterService,
-  ) {}
+  constructor(private gestureRecognizer: GestureRecognizerService) {}
 
   async ngAfterViewInit(): Promise<void> {
     const feedEl = this.cameraFeed();
     if (!feedEl) return;
 
     try {
-      await this.mediapipe.initialize(feedEl.nativeElement);
+      await this.gestureRecognizer.initialize(feedEl.nativeElement);
       this.isLoading.set(false);
 
-      this.subscription = this.mediapipe.results$.subscribe(async (results) => {
-        const gestureId = await this.llm.interpret(results);
+      this.subscription = this.gestureRecognizer.gesture$.subscribe((gestureId) => {
+        if (gestureId !== 'none') this.detectedGesture.set(gestureId);
         if (gestureId === 'none') return;
         const gesture = GESTURE_CONFIG.find((g) => g.id === gestureId);
         if (gesture) {
@@ -65,6 +62,6 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
-    this.mediapipe.stop();
+    this.gestureRecognizer.stop();
   }
 }

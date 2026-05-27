@@ -2,7 +2,7 @@
   @if (isLoading()) {
     <div class="overlay">
       <div class="spinner"></div>
-      <p>Iniciando cámara...</p>
+      <p>Iniciando cámara y cargando modelo...</p>
     </div>
   }
 
@@ -14,6 +14,9 @@
 
   <div class="panel camera-panel">
     <video #cameraFeed class="camera-feed" autoplay muted playsinline></video>
+    @if (!isLoading() && !cameraError()) {
+      <div class="gesture-badge">{{ detectedGesture() }}</div>
+    }
   </div>
 
   <div class="panel video-panel">

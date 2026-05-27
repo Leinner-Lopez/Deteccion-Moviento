@@ -18,9 +18,8 @@ export class VideoPlayerComponent {
       const el = this.videoEl();
       if (!el) return;
       const video = el.nativeElement;
-      const src = this.src();
       video.loop = this.loop();
-      video.src = src;
+      video.src = this.src();
       video.load();
       video.play().catch(() => {});
     });

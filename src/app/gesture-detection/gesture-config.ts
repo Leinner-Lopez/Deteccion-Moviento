@@ -1,20 +1,22 @@
 export interface GestureConfig {
   id: string;
-  description: string;
   video: string;
 }
 
 export const GESTURE_CONFIG: GestureConfig[] = [
   {
-    id: 'hands_up',
-    description: 'Persona con ambas manos levantadas por encima de la cabeza',
-    video: 'assets/videos/hands_up.mp4',
+    id: 'Open_Palm',
+    video: 'https://res.cloudinary.com/dgjvejfnf/video/upload/v1779900893/holograma_piramide_rl7xs0.webm',
   },
   {
-    id: 'point_right',
-    description: 'Persona señalando hacia la derecha con el brazo extendido',
-    video: 'assets/videos/point_right.mp4',
+    id: 'Thumb_Down',
+    video: 'https://res.cloudinary.com/dgjvejfnf/video/upload/v1779900914/holograma_piramide_2_dwqarg.webm',
+  },
+  {
+    id: 'Pointing_Up',
+    video: 'https://res.cloudinary.com/dgjvejfnf/video/upload/v1779900939/holograma_piramide_1_h6e741.webm',
   },
 ];
 
-export const DEFAULT_VIDEO = 'assets/videos/default.mp4';
+export const DEFAULT_VIDEO =
+  'https://res.cloudinary.com/dgjvejfnf/video/upload/v1779900893/holograma_piramide_rl7xs0.webm';
