@@ -18,10 +18,24 @@
           "options": {
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
+            "allowedCommonJsDependencies": [
+              "@mediapipe/pose",
+              "@mediapipe/hands"
+            ],
             "assets": [
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@mediapipe/pose",
+                "output": "assets/mediapipe/pose"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@mediapipe/hands",
+                "output": "assets/mediapipe/hands"
               }
             ],
             "styles": [

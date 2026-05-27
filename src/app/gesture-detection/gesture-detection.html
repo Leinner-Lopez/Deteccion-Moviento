@@ -1,0 +1,28 @@
+<div class="gesture-container">
+  @if (isLoading()) {
+    <div class="overlay">
+      <div class="spinner"></div>
+      <p>Iniciando cámara...</p>
+    </div>
+  }
+
+  @if (cameraError()) {
+    <div class="overlay error">
+      <p>{{ cameraError() }}</p>
+    </div>
+  }
+
+  <div class="panel camera-panel">
+    <video #cameraFeed class="camera-feed" autoplay muted playsinline></video>
+  </div>
+
+  <div class="panel video-panel">
+    @if (!cameraError()) {
+      <app-video-player
+        [src]="currentVideoSrc()"
+        [loop]="isDefaultVideo()"
+        (ended)="onGestureVideoEnded()"
+      />
+    }
+  </div>
+</div>
