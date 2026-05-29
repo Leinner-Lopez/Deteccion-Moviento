@@ -30,6 +30,10 @@
   object-fit: cover;
   transform: scaleX(-1); /* espejo natural */
 }
+.camera-feed,
+.camera-panel {
+  display: none;
+}
 
 .video-panel {
   display: flex;
