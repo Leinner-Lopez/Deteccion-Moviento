@@ -30,6 +30,10 @@
   object-fit: cover;
   transform: scaleX(-1); /* espejo natural */
 }
+.camera-feed,
+.camera-panel {
+  display: none;
+}
 
 .video-panel {
   display: flex;
@@ -97,6 +101,11 @@
 @media (max-width: 640px) {
   .gesture-container {
     flex-direction: column;
+  }
+
+  .camera-feed,
+  .camera-panel {
+    display: none;
   }
 
   .camera-panel {
