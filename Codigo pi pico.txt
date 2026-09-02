@@ -625,12 +625,6 @@ uint32_t animationPhaseCounter = 0;
 
 // ============ ANIMACIONES DINÁMICAS ============
 
-// Función auxiliar: mapea seno [-1, 1] a uint8_t [0, 255]
-uint8_t sineToUint8(float sineValue) {
-    uint8_t result = (uint8_t)((sineValue + 1.0f) * 127.5f);
-    return result;
-}
-
 // ============ ANIMACIONES POV PRE-RENDERIZADAS ============
 // Cada tabla es [fotograma][columna angular][LED] con la intensidad 0-255 ya
 // calculada. Se generan fuera del Pico dibujando la figura en un lienzo de
