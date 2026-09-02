@@ -615,12 +615,16 @@ uint8_t sineToUint8(float sineValue) {
     return result;
 }
 
-// ANIMACIÓN 1: Anillos con pulsación (PATTERN 1)
+// ANIMACIÓN 1: Anillos con pulsación y desvanecimiento (PATTERN 1)
 void animateRingsPulse(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    float phase = (float)animationPhase * 3.14159265f / 255.0f;
+    // Pulsación más fuerte y visible
+    float phase = (float)animationPhase * 3.14159265f / 128.0f;  // Más rápido
     float sineValue = sin(phase);
     uint8_t brightness = sineToUint8(sineValue);
-    brightness = map(brightness, 0, 255, 80, 200);
+    brightness = map(brightness, 0, 255, 50, 255);  // Más rango
+
+    // Anillos concéntricos que cambian de color
+    uint8_t colorPhase = (animationPhase / 2) % 3;
 
     if (sector == 0) {
         strip.fill(strip.Color(255, 255, 255), 0, n);
@@ -628,66 +632,141 @@ void animateRingsPulse(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     }
 
     for (uint16_t i = 0; i < n; i++) {
-        bool on = ((((uint32_t)i * 8) / n) % 2) == 0;
+        // Crear múltiples anillos
+        uint16_t ringPos = (i * 16) / n;
+        bool on = (ringPos % 4) < 2;
+
         if (on) {
-            uint8_t g = (uint8_t)((200 * brightness) / 255);
-            uint8_t b = (uint8_t)((255 * brightness) / 255);
-            strip.setPixelColor(i, strip.Color(0, g, b));
+            uint8_t r = 0;
+            uint8_t g = brightness;
+            uint8_t b = brightness;
+
+            // Cambiar color entre cian -> verde -> azul
+            if (colorPhase == 1) {
+                g = brightness;
+                b = brightness / 2;
+            } else if (colorPhase == 2) {
+                g = brightness / 2;
+                b = brightness;
+            }
+
+            strip.setPixelColor(i, strip.Color(r, g, b));
         } else {
-            strip.setPixelColor(i, 0);
+            // LEDs oscuros crean contraste
+            strip.setPixelColor(i, strip.Color(0, brightness / 4, brightness / 4));
         }
     }
 }
 
-// ANIMACIÓN 2: Aspas rotantes (PATTERN 2)
+// ANIMACIÓN 2: Aspas rotantes con gradiente y brillo (PATTERN 2)
 void spokeRotating(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     uint16_t armPeriod = POV_SECTORS / 6;
     if (armPeriod == 0) armPeriod = 1;
 
-    uint16_t rotationOffset = (animationPhase * POV_SECTORS) / 256;
+    // Rotación más rápida y suave
+    uint16_t rotationOffset = (animationPhase * POV_SECTORS) / 128;
     uint16_t rotatedSector = (sector + rotationOffset) % POV_SECTORS;
 
-    bool arm = (rotatedSector % armPeriod) < (armPeriod / 2 + 1);
+    // Calcular distancia desde el centro del aspa
+    uint16_t distFromArm = rotatedSector % armPeriod;
+    uint16_t armCenter = armPeriod / 2;
 
-    if (arm) {
-        strip.fill(strip.Color(255, 40, 0), 0, n);
+    // Brillo gradual (más brillante en el centro, oscuro en bordes)
+    uint8_t armBrightness = 0;
+    if (distFromArm <= armCenter) {
+        armBrightness = (255 * (armCenter - distFromArm)) / (armCenter + 1);
     } else {
-        strip.fill(strip.Color(0, 0, 0), 0, n);
+        armBrightness = (255 * (distFromArm - armCenter)) / (armCenter + 1);
     }
-}
-
-// ANIMACIÓN 3: Espiral vibrant (PATTERN 3)
-void spiralVibrant(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    uint8_t colorShift = (uint8_t)animationPhase;
 
     for (uint16_t i = 0; i < n; i++) {
-        uint16_t phase = (uint16_t)((sector * 3 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
-        bool on = phase < (POV_SECTORS / 4);
+        // Crear gradiente radial en los LEDs
+        uint8_t ledBrightness = (armBrightness * i) / n;
 
-        if (on) {
-            float sine1 = sin((float)(phase + colorShift) * 3.14159265f / 128.0f);
-            float cos1 = cos((float)(phase + colorShift) * 3.14159265f / 128.0f);
+        uint8_t r = ledBrightness;
+        uint8_t g = ledBrightness / 2;
+        uint8_t b = 0;
 
-            uint8_t r = 140 + (int8_t)(sine1 * 30);
-            uint8_t b = 255 + (int8_t)(cos1 * 50);
-            r = constrain(r, 0, 255);
-            b = constrain(b, 0, 255);
-            strip.setPixelColor(i, strip.Color(r, 0, b));
-        } else {
-            strip.setPixelColor(i, 0);
-        }
+        strip.setPixelColor(i, strip.Color(r, g, b));
     }
 }
 
-// ANIMACIÓN 4: Rainbow avanzado (PATTERN 0)
+// ANIMACIÓN 3: Espiral hipnotizante con múltiples colores (PATTERN 3)
+void spiralVibrant(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    uint8_t colorShift = (uint8_t)(animationPhase / 2);
+
+    for (uint16_t i = 0; i < n; i++) {
+        // Tres espirales entrelazadas para más movimiento
+        uint16_t phase1 = (uint16_t)((sector * 2 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
+        uint16_t phase2 = (uint16_t)((sector * 4 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
+        uint16_t phase3 = (uint16_t)((sector * 6 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
+
+        bool spiral1 = phase1 < (POV_SECTORS / 6);
+        bool spiral2 = phase2 < (POV_SECTORS / 6);
+        bool spiral3 = phase3 < (POV_SECTORS / 6);
+
+        uint8_t r = 0, g = 0, b = 0;
+
+        if (spiral1) {
+            // Púrpura
+            float sine1 = sin((float)(phase1 + colorShift) * 3.14159265f / 64.0f);
+            r = 200 + (int8_t)(sine1 * 55);
+            b = 255 + (int8_t)(sine1 * 20);
+        }
+
+        if (spiral2) {
+            // Cian
+            float sine2 = sin((float)(phase2 + colorShift) * 3.14159265f / 64.0f);
+            g = 180 + (int8_t)(sine2 * 75);
+            b = 255 + (int8_t)(sine2 * 30);
+        }
+
+        if (spiral3) {
+            // Verde/Lime
+            float sine3 = sin((float)(phase3 + colorShift) * 3.14159265f / 64.0f);
+            g = 200 + (int8_t)(sine3 * 55);
+            r = 100 + (int8_t)(sine3 * 40);
+        }
+
+        r = constrain(r, 0, 255);
+        g = constrain(g, 0, 255);
+        b = constrain(b, 0, 255);
+
+        strip.setPixelColor(i, strip.Color(r, g, b));
+    }
+}
+
+// ANIMACIÓN 4: Rainbow mega-dinámico con efecto pulsante (PATTERN 0)
 void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     static uint16_t drift = 0;
-    drift += (uint16_t)(g_ledSpeed >> 2);
+    drift += (uint16_t)(g_ledSpeed >> 1);  // Drift más rápido
+
+    // Efecto de "respiración" del brillo
+    float breathPhase = (float)animationPhase * 3.14159265f / 256.0f;
+    uint8_t breathBrightness = 200 + (int8_t)(sin(breathPhase) * 55);
 
     uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
+
     for (uint16_t i = 0; i < n; i++) {
-        uint16_t hue = base + (uint16_t)(((uint32_t)i * 8192UL) / n);
-        strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue)));
+        // Hue base con desplazamiento por LED
+        uint16_t hue = base + (uint16_t)(((uint32_t)i * 16384UL) / n);  // Mayor desplazamiento
+
+        // Obtener color HSV
+        uint32_t color = strip.ColorHSV(hue, 255, breathBrightness);
+
+        // Agregar variación radial (más brillante en el centro)
+        uint8_t brightness = (breathBrightness * i) / (n * 2) + (breathBrightness / 2);
+        brightness = constrain(brightness, 0, 255);
+
+        // Mezclar con el color base
+        strip.setPixelColor(i, strip.gamma32(color));
+    }
+
+    // Crear efecto de "onda" pulsante cada sector
+    if ((animationPhase % 16) < 8) {
+        for (uint16_t i = 0; i < n / 4; i++) {
+            strip.setPixelColor(i, strip.Color(255, 255, 255));
+        }
     }
 }
 
