@@ -34,6 +34,7 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
   hologramConnected: Signal<boolean>;
   hologramMotorRunning = signal(false);
   hologramRPM = signal(0);
+  hologramPattern = signal<number | null>(null);
 
   private subscriptions: Subscription[] = [];
   private monitorInterval?: ReturnType<typeof setInterval>;
@@ -57,6 +58,7 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
       if (tel) {
         this.hologramMotorRunning.set(tel.state === 'RUNNING');
         this.hologramRPM.set(Math.round(tel.rpmReal));
+        this.hologramPattern.set(tel.pattern);
       }
     }, 100);
   }
@@ -81,6 +83,7 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
 
         if (this.lastCommandedGesture !== gesture.id) {
           this.lastCommandedGesture = gesture.id;
+          console.log('🎯 Enviando comando:', gesture.hologramCommand);
           this.hologramSerial.sendCommand(gesture.hologramCommand);
         }
       });

@@ -1,0 +1,555 @@
+/*
+ * ============================================================================
+ *  CONTROLADOR DC TB6612FNG Canal B + RP2040-ZERO + WS2812B
+ *  Versión 3.0 - Open Loop con Supervisión y Telemetría
+ *  Motor DC 12V nominal, PWM efectivo máximo 9V (75% duty @ VM=12V)
+ * ============================================================================
+ */
+
+#include <hardware/pwm.h>
+#include <Adafruit_NeoPixel.h>
+
+// ============ CONFIGURACIÓN DE PINES ============
+
+#define BIN1_PIN        9       // GPIO -> Buffer -> TB6612FNG BIN1
+#define BIN2_PIN        10      // GPIO -> Buffer -> TB6612FNG BIN2
+#define PWMB_PIN        12      // PWM5B -> Buffer -> TB6612FNG PWMB
+#define STBY_PIN        11      // GPIO -> Buffer -> TB6612FNG STBY
+#define PIN_LEDS        18      // WS2812B (GP13: GPIO libre, sin conflictos)
+#define SENSOR_HALL     17      // A3144, salida open-collector
+
+// ============ PARÁMETROS DEL MOTOR ============
+
+#define PWM_FREQ            25000
+#define PWM_RESOLUTION      65535
+
+#define VMOT_VOLTAGE        12.0f
+#define MAX_VOLTAGE_EFFECT  12.0f
+#define DEFAULT_VOLTAGE     9.0f
+#define MIN_SPEED_RPM       0
+#define MAX_SPEED_RPM       4000
+
+// ============ PARÁMETROS DE CONTROL ============
+
+#define CONTROL_FREQ_HZ     10000
+#define UPDATE_INTERVAL_US  97
+
+#define RAMP_DEFAULT_RPM_S  300.0f
+
+// ============ SUPERVISOR Y TELEMETRÍA ============
+
+#define HEARTBEAT_TIMEOUT_MS    2000
+#define TELEMETRY_INTERVAL_MS   100
+
+// ============ LEDs ============
+
+#define NUM_LEDS            100
+#define LED_BRIGHTNESS_MAX  150
+
+// ============ BUFFER SERIAL ============
+
+#define CMD_BUF_SIZE        64
+
+// ============ ENUMERACIONES ============
+
+enum MotorState {
+    STATE_IDLE,
+    STATE_RAMP_UP,
+    STATE_RUNNING,
+    STATE_RAMP_DOWN,
+    STATE_COAST,
+    STATE_FAULT
+};
+
+// ============ VARIABLES GLOBALES MOTOR (Core 0) ============
+
+MotorState motorState = STATE_IDLE;
+
+bool motorDirection = true;         // true = CW, false = CCW
+float voltageMax = DEFAULT_VOLTAGE;
+float rampRateRPMs = RAMP_DEFAULT_RPM_S;
+
+float rpmTarget = 0.0f;             // Setpoint final (positivo, magnitud)
+float rpmRamped = 0.0f;             // Setpoint actual de la rampa (positivo, magnitud)
+float rpmReal = 0.0f;               // RPM medidos por Hall (positivo, magnitud)
+float desfase = 0.0f;               // rpmRamped - rpmReal
+
+uint16_t dutyMax = 0;
+int dutyCurrent = 0;
+
+uint64_t lastUpdateTime = 0;
+uint32_t lastTelemetryTime = 0;
+uint32_t lastHeartbeatTime = 0;
+
+char cmdBuffer[CMD_BUF_SIZE];
+uint8_t cmdIndex = 0;
+
+// ============ VARIABLES GLOBALES LEDS (Core 1) ============
+
+Adafruit_NeoPixel strip(NUM_LEDS, PIN_LEDS, NEO_GRB + NEO_KHZ800);
+
+volatile bool g_ledsEnabled = true;
+volatile uint8_t g_ledSpeed = 128;
+
+// ============ VARIABLES ISR HALL ============
+
+volatile uint32_t g_hallLastMicros = 0;
+volatile uint32_t g_hallPeriodUs = 0;
+volatile bool g_hallNewPulse = false;
+
+// ============ FUNCIONES AUXILIARES ============
+
+void motorStopCoast() {
+    digitalWrite(BIN1_PIN, LOW);
+    digitalWrite(BIN2_PIN, LOW);
+    analogWrite(PWMB_PIN, 0);
+    dutyCurrent = 0;
+}
+
+void motorSetDirectionAndPWM(int duty, bool cw) {
+    if (cw) {
+        digitalWrite(BIN1_PIN, HIGH);
+        digitalWrite(BIN2_PIN, LOW);
+    } else {
+        digitalWrite(BIN1_PIN, LOW);
+        digitalWrite(BIN2_PIN, HIGH);
+    }
+    analogWrite(PWMB_PIN, duty);
+    dutyCurrent = duty;
+}
+
+float rampSetpoint(float current, float target, float maxDelta) {
+    if (target > current + maxDelta) return current + maxDelta;
+    if (target < current - maxDelta) return current - maxDelta;
+    return target;
+}
+
+// ============ ISR SENSOR HALL ============
+
+void onHallPulse() {
+    uint32_t now = micros();
+    uint32_t period = now - g_hallLastMicros;
+    if (period > 1000) {
+        g_hallPeriodUs = period;
+        g_hallLastMicros = now;
+        g_hallNewPulse = true;
+    }
+}
+
+// ============ INICIALIZACIÓN PWM ============
+
+void initPWM() {
+    Serial.println("[PWM] Inicializando TB6612FNG Canal B...");
+
+    pinMode(BIN1_PIN, OUTPUT);
+    pinMode(BIN2_PIN, OUTPUT);
+    pinMode(STBY_PIN, OUTPUT);
+    pinMode(PWMB_PIN, OUTPUT);
+
+    digitalWrite(STBY_PIN, HIGH);
+    motorStopCoast();
+
+    analogWriteFreq(PWM_FREQ);
+    analogWriteResolution(16);
+
+    uint slice_B = pwm_gpio_to_slice_num(PWMB_PIN);
+    pwm_set_enabled(slice_B, false);
+    pwm_set_counter(slice_B, 0);
+    pwm_set_enabled(slice_B, true);
+
+    Serial.println("[PWM] OK 25kHz en PWMB (GP11)");
+}
+
+void recalcDutyMax() {
+    dutyMax = (uint16_t)((voltageMax / VMOT_VOLTAGE) * (float)PWM_RESOLUTION);
+}
+
+void setMotorVoltage(float v) {
+    v = constrain(v, 0.0f, MAX_VOLTAGE_EFFECT);
+    voltageMax = v;
+    recalcDutyMax();
+    Serial.print("OK VOLT ");
+    Serial.println(voltageMax);
+}
+
+void setRampRate(float r) {
+    r = constrain(r, 10.0f, 2000.0f);
+    rampRateRPMs = r;
+    Serial.print("OK RAMP ");
+    Serial.println(rampRateRPMs);
+}
+
+void setMotorDirection(bool cw) {
+    if (motorState != STATE_IDLE) {
+        Serial.println("ERR DIR Solo modificable en IDLE");
+        return;
+    }
+    motorDirection = cw;
+    Serial.print("OK DIR ");
+    Serial.println(cw ? "CW" : "CCW");
+}
+
+// ============ MÁQUINA DE ESTADOS DEL MOTOR ============
+
+void enterFault(const char* reason) {
+    motorState = STATE_FAULT;
+    motorStopCoast();
+    Serial.print("ERR FAULT ");
+    Serial.println(reason);
+}
+
+void updateMotor() {
+    // 1. Verificar heartbeat
+    if (millis() - lastHeartbeatTime > HEARTBEAT_TIMEOUT_MS) {
+        if (motorState != STATE_IDLE && motorState != STATE_FAULT) {
+            enterFault("NO_HEARTBEAT");
+            return;
+        }
+    }
+
+    // 2. Calcular paso de rampa
+    float rampStep = (rampRateRPMs * (float)UPDATE_INTERVAL_US) / 1000000.0f;
+
+    switch (motorState) {
+        case STATE_IDLE:
+            return;
+
+        case STATE_RAMP_UP:
+            rpmRamped = rampSetpoint(rpmRamped, rpmTarget, rampStep);
+            if (fabsf(rpmRamped - rpmTarget) < 1.0f) {
+                rpmRamped = rpmTarget;
+                motorState = STATE_RUNNING;
+            }
+            break;
+
+        case STATE_RUNNING:
+            if (rpmTarget > rpmRamped + 1.0f) {
+                motorState = STATE_RAMP_UP;
+            } else if (rpmTarget < rpmRamped - 1.0f) {
+                motorState = STATE_RAMP_DOWN;
+            }
+            rpmRamped = rpmTarget;
+            break;
+
+        case STATE_RAMP_DOWN:
+            rpmRamped = rampSetpoint(rpmRamped, 0.0f, rampStep);
+            if (rpmRamped <= 1.0f) {
+                rpmRamped = 0.0f;
+                motorState = STATE_COAST;
+            }
+            break;
+
+        case STATE_COAST:
+            motorStopCoast();
+            motorState = STATE_IDLE;
+            Serial.println("OK COASTED");
+            return;
+
+        case STATE_FAULT:
+            return;
+    }
+
+    // 3. Calcular RPM real desde Hall
+    noInterrupts();
+    uint32_t hallPeriod = g_hallPeriodUs;
+    g_hallNewPulse = false;
+    interrupts();
+
+    if (hallPeriod > 0) {
+        rpmReal = (60.0f * 1000000.0f) / (float)hallPeriod;
+    } else {
+        rpmReal = 0.0f;
+    }
+
+    desfase = rpmRamped - rpmReal;
+
+    // 4. Calcular duty lineal: (rpmRamped / 4000) * dutyMax
+    int duty = (int)((rpmRamped / (float)MAX_SPEED_RPM) * (float)dutyMax);
+    if (duty > dutyMax) duty = dutyMax;
+    if (duty < 0) duty = 0;
+
+    // 5. Aplicar dirección y PWM
+    if (rpmRamped < 0.5f) {
+        motorStopCoast();
+    } else {
+        motorSetDirectionAndPWM(duty, motorDirection);
+    }
+}
+
+// ============ TELEMETRÍA ============
+
+void sendTelemetry() {
+    float dutyPct = 0.0f;
+    if (PWM_RESOLUTION > 0) {
+        dutyPct = (dutyCurrent * 100.0f) / PWM_RESOLUTION;
+    }
+
+    Serial.print("TEL state=");
+    switch (motorState) {
+        case STATE_IDLE:      Serial.print("IDLE"); break;
+        case STATE_RAMP_UP:   Serial.print("RAMP_UP"); break;
+        case STATE_RUNNING:   Serial.print("RUNNING"); break;
+        case STATE_RAMP_DOWN: Serial.print("RAMP_DOWN"); break;
+        case STATE_COAST:     Serial.print("COAST"); break;
+        case STATE_FAULT:     Serial.print("FAULT"); break;
+    }
+    Serial.print(" rpm_target="); Serial.print(rpmRamped, 1);
+    Serial.print(" rpm_real=");  Serial.print(rpmReal, 1);
+    Serial.print(" desfase=");   Serial.print(desfase, 1);
+    Serial.print(" volt=");      Serial.print(voltageMax, 1);
+    Serial.print(" duty=");      Serial.print(dutyPct, 1);
+    Serial.print(" hall_dt=");    Serial.print(g_hallPeriodUs);
+    Serial.print(" ramp_rate=");  Serial.print(rampRateRPMs, 1);
+    Serial.println();
+}
+
+// ============ COMANDOS SERIAL ============
+
+void printHelp() {
+    Serial.println("=== COMANDOS ===");
+    Serial.println("START <rpm>    Arranca rampa (0..4000)");
+    Serial.println("STOP           Detiene suavemente (ramp -> coast)");
+    Serial.println("VOLT <v>       Voltaje efectivo 0.0..9.0");
+    Serial.println("RAMP <rpm/s>   Aceleracion 10..2000 (default 300)");
+    Serial.println("DIR CW|CCW     Sentido (solo en IDLE)");
+    Serial.println("LEDS ON|OFF    Control tira LED");
+    Serial.println("LEDSPEED <n>   Velocidad rainbow 0..255");
+    Serial.println("HBT            Heartbeat (cada <500ms)");
+    Serial.println("STATUS         Estado completo");
+    Serial.println("RESET          Limpiar FAULT");
+    Serial.println("HELP           Este mensaje");
+}
+
+void printStatus() {
+    Serial.print("STATUS state=");
+    switch (motorState) {
+        case STATE_IDLE: Serial.print("IDLE"); break;
+        case STATE_RAMP_UP: Serial.print("RAMP_UP"); break;
+        case STATE_RUNNING: Serial.print("RUNNING"); break;
+        case STATE_RAMP_DOWN: Serial.print("RAMP_DOWN"); break;
+        case STATE_COAST: Serial.print("COAST"); break;
+        case STATE_FAULT: Serial.print("FAULT"); break;
+    }
+    Serial.print(" target="); Serial.print(rpmTarget);
+    Serial.print(" ramped=");   Serial.print(rpmRamped);
+    Serial.print(" real=");     Serial.print(rpmReal);
+    Serial.print(" desfase="); Serial.print(desfase);
+    Serial.print(" volt=");    Serial.print(voltageMax);
+    Serial.print(" dir=");     Serial.print(motorDirection ? "CW" : "CCW");
+    Serial.print(" ramp=");    Serial.print(rampRateRPMs);
+    Serial.print(" leds=");    Serial.print(g_ledsEnabled ? "ON" : "OFF");
+    Serial.print(" ledspeed=");Serial.println(g_ledSpeed);
+}
+
+void processCommand(const char* cmd) {
+    char buf[CMD_BUF_SIZE];
+    strncpy(buf, cmd, CMD_BUF_SIZE - 1);
+    buf[CMD_BUF_SIZE - 1] = '\0';
+
+    char* token = strtok(buf, " ");
+    if (token == NULL) return;
+
+    for (char* p = token; *p; p++) *p = toupper(*p);
+
+    char* arg = strtok(NULL, " ");
+
+    if (strcmp(token, "START") == 0) {
+        if (motorState == STATE_FAULT) {
+            Serial.println("ERR En FAULT, enviar RESET primero");
+            return;
+        }
+        int rpm = (arg != NULL) ? atoi(arg) : 100;
+        rpm = constrain(rpm, MIN_SPEED_RPM, MAX_SPEED_RPM);
+        rpmTarget = (float)rpm;
+
+        if (motorState == STATE_IDLE) {
+            initPWM();
+            recalcDutyMax();
+            motorState = STATE_RAMP_UP;
+            rpmRamped = 0.0f;
+            Serial.print("OK START ");
+            Serial.println(rpm);
+        } else {
+            Serial.print("OK TARGET ");
+            Serial.println(rpm);
+        }
+    }
+    else if (strcmp(token, "STOP") == 0) {
+        rpmTarget = 0.0f;
+        if (motorState == STATE_RUNNING || motorState == STATE_RAMP_UP) {
+            motorState = STATE_RAMP_DOWN;
+            Serial.println("OK STOP");
+        } else if (motorState == STATE_IDLE) {
+            Serial.println("OK ALREADY_IDLE");
+        }
+    }
+    else if (strcmp(token, "VOLT") == 0) {
+        if (arg != NULL) {
+            setMotorVoltage(atof(arg));
+        } else {
+            Serial.print("OK VOLT ");
+            Serial.println(voltageMax);
+        }
+    }
+    else if (strcmp(token, "RAMP") == 0) {
+        if (arg != NULL) {
+            setRampRate(atof(arg));
+        } else {
+            Serial.print("OK RAMP ");
+            Serial.println(rampRateRPMs);
+        }
+    }
+    else if (strcmp(token, "DIR") == 0) {
+        if (arg != NULL) {
+            setMotorDirection(strcmp(arg, "CW") == 0 || strcmp(arg, "cw") == 0);
+        } else {
+            Serial.print("OK DIR ");
+            Serial.println(motorDirection ? "CW" : "CCW");
+        }
+    }
+    else if (strcmp(token, "LEDS") == 0) {
+        if (arg != NULL && (strcmp(arg, "ON") == 0 || strcmp(arg, "on") == 0)) {
+            g_ledsEnabled = true;
+            Serial.println("OK LEDS ON");
+        } else if (arg != NULL && (strcmp(arg, "OFF") == 0 || strcmp(arg, "off") == 0)) {
+            g_ledsEnabled = false;
+            Serial.println("OK LEDS OFF");
+        } else {
+            Serial.print("OK LEDS ");
+            Serial.println(g_ledsEnabled ? "ON" : "OFF");
+        }
+    }
+    else if (strcmp(token, "LEDSPEED") == 0) {
+        if (arg != NULL) {
+            int sp = atoi(arg);
+            sp = constrain(sp, 0, 255);
+            g_ledSpeed = (uint8_t)sp;
+            Serial.print("OK LEDSPEED ");
+            Serial.println(g_ledSpeed);
+        } else {
+            Serial.print("OK LEDSPEED ");
+            Serial.println(g_ledSpeed);
+        }
+    }
+    else if (strcmp(token, "HBT") == 0) {
+        lastHeartbeatTime = millis();
+        Serial.println("OK HBT");
+    }
+    else if (strcmp(token, "STATUS") == 0) {
+        printStatus();
+    }
+    else if (strcmp(token, "RESET") == 0) {
+        if (motorState == STATE_FAULT) {
+            motorState = STATE_IDLE;
+            rpmTarget = 0.0f;
+            rpmRamped = 0.0f;
+            Serial.println("OK RESET");
+        } else {
+            Serial.println("ERR No en FAULT");
+        }
+    }
+    else if (strcmp(token, "HELP") == 0) {
+        printHelp();
+    }
+    else {
+        Serial.print("ERR UNKNOWN ");
+        Serial.println(token);
+    }
+}
+
+// ============ SETUP Y LOOP (CORE 0) ============
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    pinMode(SENSOR_HALL, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(SENSOR_HALL), onHallPulse, FALLING);
+
+    initPWM();
+    recalcDutyMax();
+
+    lastHeartbeatTime = millis();
+
+    Serial.println("\n========================================");
+    Serial.println("  DC Motor TB6612FNG + WS2812B v3.0");
+    Serial.println("========================================");
+    Serial.print("Pines: BIN1=GP"); Serial.print(BIN1_PIN);
+    Serial.print(" BIN2=GP"); Serial.print(BIN2_PIN);
+    Serial.print(" PWMB=GP"); Serial.print(PWMB_PIN);
+    Serial.print(" STBY=GP"); Serial.println(STBY_PIN);
+    Serial.print("LEDs: "); Serial.print(NUM_LEDS);
+    Serial.print(" WS2812B @ GP"); Serial.println(PIN_LEDS);
+    Serial.print("PWM: "); Serial.print(PWM_FREQ / 1000);
+    Serial.println("kHz | Control 10kHz");
+    Serial.print("Voltaje efectivo max: ");
+    Serial.print(voltageMax);
+    Serial.println("V (VM=12V)");
+    Serial.print("Ramp: ");
+    Serial.print(RAMP_DEFAULT_RPM_S);
+    Serial.println(" RPM/s default");
+    Serial.println("Heartbeat: 2s timeout | Telemetry: 10Hz");
+    Serial.println("========================================");
+    Serial.println("Enviar HELP para comandos");
+    Serial.println("========================================\n");
+}
+
+void loop() {
+    uint64_t now = micros();
+    if ((now - lastUpdateTime) >= (uint64_t)UPDATE_INTERVAL_US) {
+        lastUpdateTime += (uint64_t)UPDATE_INTERVAL_US;
+        updateMotor();
+    }
+
+    uint32_t nowMs = millis();
+    if (nowMs - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
+        lastTelemetryTime = nowMs;
+        sendTelemetry();
+    }
+
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (cmdIndex > 0) {
+                cmdBuffer[cmdIndex] = '\0';
+                processCommand(cmdBuffer);
+                cmdIndex = 0;
+            }
+        } else if (cmdIndex < CMD_BUF_SIZE - 1) {
+            cmdBuffer[cmdIndex++] = c;
+        }
+    }
+}
+
+// ============ SETUP1 Y LOOP1 (CORE 1 - LEDs) ============
+
+void setup1() {
+    strip.begin();
+    strip.show();
+    strip.setBrightness(LED_BRIGHTNESS_MAX);
+}
+
+void loop1() {
+    if (!g_ledsEnabled) {
+        strip.clear();
+        strip.show();
+        delay(100);
+        return;
+    }
+
+    int frameDelay = map((int)g_ledSpeed, 0, 255, 80, 0);
+
+    for (long firstPixelHue = 0; firstPixelHue < 5 * 65536L; firstPixelHue += 256) {
+        if (!g_ledsEnabled) break;
+
+        for (int i = 0; i < strip.numPixels(); i++) {
+            int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
+            strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+        }
+        strip.show();
+
+        if (frameDelay > 0) {
+            delay(frameDelay);
+        }
+    }
+}

@@ -110,11 +110,16 @@ export class HologramSerialService implements OnDestroy {
   }
 
   async sendCommand(command: string): Promise<void> {
-    if (!this.writer) return;
+    if (!this.writer) {
+      console.warn('❌ Writer no disponible. Puerto desconectado?');
+      return;
+    }
     try {
+      console.log('📤 Escribiendo en puerto:', command);
       await this.writer.write(new TextEncoder().encode(command + '\n'));
-    } catch {
-      // puerto desconectado u otro error de escritura: se ignora
+      console.log('✅ Comando enviado:', command);
+    } catch (err) {
+      console.error('❌ Error escribiendo:', err);
     }
   }
 
@@ -162,8 +167,14 @@ export class HologramSerialService implements OnDestroy {
 
   private handleLine(line: string): void {
     const tel = parseTelemetry(line);
-    if (!tel) return;
+    if (!tel) {
+      if (line.startsWith('OK') || line.startsWith('ERR')) {
+        console.log('📨 Respuesta firmware:', line);
+      }
+      return;
+    }
     this.telemetry.set(tel);
+    console.log('📊 Patrón actual:', tel.pattern, 'Sector:', tel.povSector);
     if (tel.state === 'FAULT') this.recoverFromFault();
   }
 

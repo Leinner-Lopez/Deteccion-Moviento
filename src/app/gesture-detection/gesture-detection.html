@@ -24,6 +24,9 @@
               <span class="motor-stopped">⚫ Motor detenido</span>
             }
           </div>
+          <div class="pattern-status">
+            Patrón LED: #{{ hologramPattern() ?? '?' }}
+          </div>
         </div>
       } @else {
         <button type="button" class="hologram-connect-btn" (click)="connectHologram()">

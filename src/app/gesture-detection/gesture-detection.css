@@ -164,6 +164,16 @@
   color: #a3a3a3;
 }
 
+.pattern-status {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fbbf24;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
 /* En móvil apilamos verticalmente: cámara arriba, video abajo */
 @media (max-width: 640px) {
   .gesture-container {
