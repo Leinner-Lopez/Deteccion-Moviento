@@ -350,7 +350,9 @@ void printHelp() {
     Serial.println("DIR CW|CCW     Sentido (solo en IDLE)");
     Serial.println("LEDS ON|OFF    Control tira LED");
     Serial.println("LEDSPEED <n>   Deriva del arcoiris 0..255");
-    Serial.println("PATTERN <n>    Figura POV: 0=arcoiris 1=anillos 2=aspas 3=espiral");
+    Serial.println("PATTERN <n>    Patrones POV:");
+    Serial.println("  0=Arcoiris  1=Anillos  2=Aspas  3=Espiral");
+    Serial.println("  4=Mano     5=Corriendo  6=Latido  7=Strobe");
     Serial.println("LEDCOLOR <r> <g> <b>  Color fijo sin POV (prueba)");
     Serial.println("LEDCOUNT <n>   Cantidad real de LEDs 1..100");
     Serial.println("HBT            Heartbeat (cada <500ms)");
@@ -478,8 +480,9 @@ void processCommand(const char* cmd) {
     }
     else if (strcmp(token, "PATTERN") == 0) {
         // PATTERN <n> -> figura POV que selecciona el gesto desde la web
+        // 0=RAINBOW, 1=RINGS, 2=SPOKES, 3=SPIRAL, 4=WAVE, 5=RUNNER, 6=HEARTBEAT, 7=STROBE
         if (arg != NULL) {
-            int p = constrain(atoi(arg), 0, 3);
+            int p = constrain(atoi(arg), 0, 7);
             g_ledPattern = (uint8_t)p;
             g_ledsEnabled = true;
         }
@@ -770,6 +773,131 @@ void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     }
 }
 
+// ANIMACIÓN 5: Mano saludando (PATTERN 4)
+void animateWave(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Mano saludando de lado a lado
+    float wavePhase = (float)animationPhase * 3.14159265f / 64.0f;
+    uint16_t handPos = n / 2 + (int16_t)(sin(wavePhase) * n / 3);
+    handPos = constrain(handPos, 5, n - 5);
+
+    uint8_t handWidth = 12;
+
+    for (uint16_t i = 0; i < n; i++) {
+        int16_t dist = abs((int16_t)i - (int16_t)handPos);
+
+        if (dist < handWidth) {
+            // Gradiente suave desde el centro de la mano
+            uint8_t brightness = 255 - (dist * 255 / handWidth);
+            uint8_t g = brightness;
+            uint8_t b = brightness;
+            uint8_t r = brightness / 2;
+
+            strip.setPixelColor(i, strip.Color(r, g, b));
+        } else if (dist < handWidth + 8) {
+            // Aura alrededor de la mano
+            uint8_t brightness = (255 - dist * 255 / (handWidth + 8)) / 3;
+            strip.setPixelColor(i, strip.Color(brightness / 2, brightness, brightness));
+        } else {
+            // Fondo oscuro
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// ANIMACIÓN 6: Persona corriendo (PATTERN 5)
+void animateRunner(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Figura corriendo: dos "piernas" que se mueven alternadamente
+    uint8_t runPos = (animationPhase / 3) % n;
+    uint8_t speed = 8;
+
+    for (uint16_t i = 0; i < n; i++) {
+        // Cabeza (adelante)
+        if (i == (runPos + 3) % n) {
+            strip.setPixelColor(i, strip.Color(255, 200, 0));  // Amarillo (cabeza)
+        }
+        // Cuerpo (centro)
+        else if (i == runPos || i == (runPos + 2) % n) {
+            strip.setPixelColor(i, strip.Color(0, 255, 100));  // Verde lima
+        }
+        // Pierna izquierda (movimiento 1)
+        else if (i == (runPos + speed * (animationPhase % 2)) % n) {
+            strip.setPixelColor(i, strip.Color(255, 0, 0));  // Rojo
+        }
+        // Pierna derecha (movimiento alternado)
+        else if (i == (runPos + speed * (1 - (animationPhase % 2))) % n) {
+            strip.setPixelColor(i, strip.Color(255, 0, 100));  // Magenta
+        }
+        // Rastro (trail effect)
+        else if (abs((int16_t)i - (int16_t)runPos) < 5) {
+            uint8_t trailBrightness = (5 - abs((int16_t)i - (int16_t)runPos)) * 40;
+            strip.setPixelColor(i, strip.Color(100, 100, 50));
+        } else {
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// ANIMACIÓN 7: Pulso cardiaco (PATTERN 6)
+void animateHeartbeat(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Patrón de latido cardiaco: DOS pulsos seguidos, luego pausa
+    uint8_t beatPhase = animationPhase % 80;
+
+    float heartIntensity = 0;
+
+    // Primer pulso (0-20)
+    if (beatPhase < 20) {
+        heartIntensity = sin((float)beatPhase * 3.14159265f / 20.0f);
+    }
+    // Pausa (20-30)
+    else if (beatPhase < 30) {
+        heartIntensity = 0;
+    }
+    // Segundo pulso (30-45)
+    else if (beatPhase < 45) {
+        heartIntensity = sin((float)(beatPhase - 30) * 3.14159265f / 15.0f);
+    }
+    // Pausa larga (45-80)
+    else {
+        heartIntensity = 0;
+    }
+
+    uint8_t brightness = (uint8_t)(heartIntensity * 255);
+
+    for (uint16_t i = 0; i < n; i++) {
+        // Efecto de latido radial desde el centro
+        uint16_t centerDist = abs((int16_t)(n / 2) - (int16_t)i);
+        uint8_t ledBrightness = brightness - (centerDist * brightness / (n / 2));
+        ledBrightness = constrain(ledBrightness, 0, 255);
+
+        // Rojo para latido cardiaco
+        uint8_t r = ledBrightness;
+        uint8_t g = ledBrightness / 3;
+        uint8_t b = 0;
+
+        strip.setPixelColor(i, strip.Color(r, g, b));
+    }
+}
+
+// ANIMACIÓN 8: Strobe/Flash (PATTERN 7)
+void animateStrobe(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Flash estroboscópico sincronizado
+    uint8_t flashPhase = animationPhase % 32;
+
+    if (flashPhase < 4) {
+        // Flash blanco rápido
+        strip.fill(strip.Color(255, 255, 255), 0, n);
+    } else if (flashPhase < 8) {
+        // Pausa corta
+        strip.fill(strip.Color(0, 0, 0), 0, n);
+    } else if (flashPhase < 12) {
+        // Segundo flash
+        strip.fill(strip.Color(255, 100, 255), 0, n);  // Magenta
+    } else {
+        // Pausa larga
+        strip.fill(strip.Color(0, 0, 0), 0, n);
+    }
+}
+
 void setup1() {
     strip.begin();
     strip.show();
@@ -851,6 +979,22 @@ void loop1() {
 
         case PATTERN_SPIRAL:
             spiralVibrant(sector, n, animationPhaseCounter);
+            break;
+
+        case 4:  // WAVE - Mano saludando
+            animateWave(sector, n, animationPhaseCounter);
+            break;
+
+        case 5:  // RUNNER - Persona corriendo
+            animateRunner(sector, n, animationPhaseCounter);
+            break;
+
+        case 6:  // HEARTBEAT - Pulso cardiaco
+            animateHeartbeat(sector, n, animationPhaseCounter);
+            break;
+
+        case 7:  // STROBE - Flash estroboscópico
+            animateStrobe(sector, n, animationPhaseCounter);
             break;
 
         case PATTERN_RAINBOW:
