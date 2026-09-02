@@ -8,6 +8,7 @@
 
 #include <hardware/pwm.h>
 #include <Adafruit_NeoPixel.h>
+#include <math.h>
 
 // ============ CONFIGURACIÓN DE PINES ============
 
@@ -603,6 +604,93 @@ void loop() {
 
 // ============ SETUP1 Y LOOP1 (CORE 1 - LEDs) ============
 
+// Contador global de fase para animaciones
+uint32_t animationPhaseCounter = 0;
+
+// ============ ANIMACIONES DINÁMICAS ============
+
+// Función auxiliar: mapea seno [-1, 1] a uint8_t [0, 255]
+uint8_t sineToUint8(float sineValue) {
+    uint8_t result = (uint8_t)((sineValue + 1.0f) * 127.5f);
+    return result;
+}
+
+// ANIMACIÓN 1: Anillos con pulsación (PATTERN 1)
+void animateRingsPulse(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    float phase = (float)animationPhase * 3.14159265f / 255.0f;
+    float sineValue = sin(phase);
+    uint8_t brightness = sineToUint8(sineValue);
+    brightness = map(brightness, 0, 255, 80, 200);
+
+    if (sector == 0) {
+        strip.fill(strip.Color(255, 255, 255), 0, n);
+        return;
+    }
+
+    for (uint16_t i = 0; i < n; i++) {
+        bool on = ((((uint32_t)i * 8) / n) % 2) == 0;
+        if (on) {
+            uint8_t g = (uint8_t)((200 * brightness) / 255);
+            uint8_t b = (uint8_t)((255 * brightness) / 255);
+            strip.setPixelColor(i, strip.Color(0, g, b));
+        } else {
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// ANIMACIÓN 2: Aspas rotantes (PATTERN 2)
+void spokeRotating(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    uint16_t armPeriod = POV_SECTORS / 6;
+    if (armPeriod == 0) armPeriod = 1;
+
+    uint16_t rotationOffset = (animationPhase * POV_SECTORS) / 256;
+    uint16_t rotatedSector = (sector + rotationOffset) % POV_SECTORS;
+
+    bool arm = (rotatedSector % armPeriod) < (armPeriod / 2 + 1);
+
+    if (arm) {
+        strip.fill(strip.Color(255, 40, 0), 0, n);
+    } else {
+        strip.fill(strip.Color(0, 0, 0), 0, n);
+    }
+}
+
+// ANIMACIÓN 3: Espiral vibrant (PATTERN 3)
+void spiralVibrant(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    uint8_t colorShift = (uint8_t)animationPhase;
+
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t phase = (uint16_t)((sector * 3 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
+        bool on = phase < (POV_SECTORS / 4);
+
+        if (on) {
+            float sine1 = sin((float)(phase + colorShift) * 3.14159265f / 128.0f);
+            float cos1 = cos((float)(phase + colorShift) * 3.14159265f / 128.0f);
+
+            uint8_t r = 140 + (int8_t)(sine1 * 30);
+            uint8_t b = 255 + (int8_t)(cos1 * 50);
+            r = constrain(r, 0, 255);
+            b = constrain(b, 0, 255);
+            strip.setPixelColor(i, strip.Color(r, 0, b));
+        } else {
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// ANIMACIÓN 4: Rainbow avanzado (PATTERN 0)
+void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    static uint16_t drift = 0;
+    drift += (uint16_t)(g_ledSpeed >> 2);
+
+    uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t hue = base + (uint16_t)(((uint32_t)i * 8192UL) / n);
+        strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue)));
+    }
+}
+
 void setup1() {
     strip.begin();
     strip.show();
@@ -641,64 +729,10 @@ uint16_t povCurrentSector() {
     return (uint16_t)(((uint64_t)dt * POV_SECTORS) / period);
 }
 
-// ---------- Dibujo de una columna angular ----------
-
-void povRenderSector(uint8_t pattern, uint16_t sector, uint16_t n) {
-    static uint16_t drift = 0;
-
-    switch (pattern) {
-        case PATTERN_RINGS: {
-            // Anillos concentricos cian + marcador blanco en el indice
-            if (sector == 0) {
-                strip.fill(strip.Color(255, 255, 255), 0, n);
-                break;
-            }
-            for (uint16_t i = 0; i < n; i++) {
-                bool on = ((((uint32_t)i * 8) / n) % 2) == 0;
-                strip.setPixelColor(i, on ? strip.Color(0, 200, 255) : 0);
-            }
-            break;
-        }
-
-        case PATTERN_SPOKES: {
-            // Seis aspas rojas fijas en el espacio
-            uint16_t armPeriod = POV_SECTORS / 6;
-            if (armPeriod == 0) armPeriod = 1;
-            bool arm = (sector % armPeriod) < (armPeriod / 2 + 1);
-            uint32_t c = arm ? strip.Color(255, 40, 0) : 0;
-            strip.fill(c, 0, n);
-            break;
-        }
-
-        case PATTERN_SPIRAL: {
-            // Espiral violeta: el brazo se corre un sector por cada tramo radial
-            for (uint16_t i = 0; i < n; i++) {
-                uint16_t phase =
-                    (uint16_t)((sector * 3 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
-                bool on = phase < (POV_SECTORS / 4);
-                strip.setPixelColor(i, on ? strip.Color(140, 0, 255) : 0);
-            }
-            break;
-        }
-
-        case PATTERN_RAINBOW:
-        default: {
-            // Disco arcoiris: el tono depende del angulo real, no del tiempo
-            drift += (uint16_t)(g_ledSpeed >> 2);
-            uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
-            for (uint16_t i = 0; i < n; i++) {
-                uint16_t hue = base + (uint16_t)(((uint32_t)i * 8192UL) / n);
-                strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue)));
-            }
-            break;
-        }
-    }
-}
-
 void loop1() {
     if (g_ledCountDirty) {
         g_ledCountDirty = false;
-        strip.clear();          // limpia LEDs que quedaron fuera del nuevo largo
+        strip.clear();
         strip.show();
     }
 
@@ -712,6 +746,9 @@ void loop1() {
     uint8_t pattern = g_ledPattern;
     uint16_t n = g_ledCount;
 
+    // Incrementar fase de animación (0-255 cíclico)
+    animationPhaseCounter = (animationPhaseCounter + 2) % 256;
+
     if (pattern == PATTERN_SOLID) {
         strip.fill(strip.Color(g_ledR, g_ledG, g_ledB), 0, n);
         strip.show();
@@ -719,9 +756,29 @@ void loop1() {
         return;
     }
 
-    // Sin delay: el ritmo lo impone strip.show() (~30 us por LED).
+    // Sincronizar con rotación real
     uint16_t sector = povCurrentSector();
     g_povSector = sector;
-    povRenderSector(pattern, sector, n);
+
+    // Renderizar patrón con animación
+    switch (pattern) {
+        case PATTERN_RINGS:
+            animateRingsPulse(sector, n, animationPhaseCounter);
+            break;
+
+        case PATTERN_SPOKES:
+            spokeRotating(sector, n, animationPhaseCounter);
+            break;
+
+        case PATTERN_SPIRAL:
+            spiralVibrant(sector, n, animationPhaseCounter);
+            break;
+
+        case PATTERN_RAINBOW:
+        default:
+            rainbowAdvanced(sector, n, animationPhaseCounter);
+            break;
+    }
+
     strip.show();
 }
