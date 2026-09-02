@@ -27,6 +27,27 @@ export const GESTURE_CONFIG: GestureConfig[] = [
     // Espiral violeta
     hologramCommand: 'PATTERN 3',
   },
+  {
+    id: 'Victory',
+    video:
+      'https://res.cloudinary.com/dgjvejfnf/video/upload/v1780413093/animacion_1780346973883_sxqran.webm',
+    // Mano saludando
+    hologramCommand: 'PATTERN 4',
+  },
+  {
+    id: 'Okay',
+    video:
+      'https://res.cloudinary.com/dgjvejfnf/video/upload/v1780413093/animacion_1780412553562_mvkeb9.webm',
+    // Persona corriendo
+    hologramCommand: 'PATTERN 5',
+  },
+  {
+    id: 'Peace',
+    video:
+      'https://res.cloudinary.com/dgjvejfnf/video/upload/v1780413092/animacion_1780412533217_zwyjwj.webm',
+    // Latido cardiaco
+    hologramCommand: 'PATTERN 6',
+  },
 ];
 
 export const DEFAULT_VIDEO =
