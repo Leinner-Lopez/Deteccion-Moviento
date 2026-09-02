@@ -12,6 +12,31 @@
     </div>
   }
 
+  @if (hologramSupported()) {
+    <div class="hologram-status">
+      @if (hologramConnected()) {
+        <div class="hologram-connected">
+          <span class="hologram-badge connected">Holograma conectado</span>
+          <div class="motor-status">
+            @if (hologramMotorRunning()) {
+              <span class="motor-running">🔴 Motor en giro: {{ hologramRPM() }} RPM</span>
+            } @else {
+              <span class="motor-stopped">⚫ Motor detenido</span>
+            }
+          </div>
+        </div>
+      } @else {
+        <button type="button" class="hologram-connect-btn" (click)="connectHologram()">
+          Conectar holograma (inicia motor automáticamente)
+        </button>
+      }
+    </div>
+  } @else {
+    <div class="hologram-status">
+      <span class="hologram-badge unsupported">Holograma: requiere Chrome/Edge de escritorio</span>
+    </div>
+  }
+
   <div class="panel camera-panel">
     <video #cameraFeed class="camera-feed" autoplay muted playsinline></video>
     @if (!isLoading() && !cameraError()) {

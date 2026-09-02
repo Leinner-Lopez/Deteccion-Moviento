@@ -4,12 +4,14 @@ import {
   Component,
   ElementRef,
   OnDestroy,
+  Signal,
   signal,
   viewChild,
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { GestureRecognizerService } from './gesture-recognizer.service';
-import { DEFAULT_VIDEO, GESTURE_CONFIG } from './gesture-config';
+import { HologramSerialService } from './hologram-serial.service';
+import { DEFAULT_HOLOGRAM_COMMAND, DEFAULT_VIDEO, GESTURE_CONFIG } from './gesture-config';
 import { VideoPlayerComponent } from './video-player/video-player';
 
 @Component({
@@ -28,9 +30,36 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
   cameraError = signal<string | null>(null);
   isLoading = signal(true);
 
-  private subscription?: Subscription;
+  hologramSupported: Signal<boolean>;
+  hologramConnected: Signal<boolean>;
+  hologramMotorRunning = signal(false);
+  hologramRPM = signal(0);
 
-  constructor(private gestureRecognizer: GestureRecognizerService) {}
+  private subscriptions: Subscription[] = [];
+  private monitorInterval?: ReturnType<typeof setInterval>;
+  /** Último gesto comandado: evita reenviar el mismo comando a 6-7 Hz. */
+  private lastCommandedGesture: string | null = null;
+
+  constructor(
+    private gestureRecognizer: GestureRecognizerService,
+    private hologramSerial: HologramSerialService,
+  ) {
+    this.hologramSupported = this.hologramSerial.isSupported;
+    this.hologramConnected = this.hologramSerial.connected;
+  }
+
+  connectHologram(): void {
+    this.hologramSerial.connect();
+    // Monitorea la telemetría para mostrar estado del motor
+    if (this.monitorInterval) clearInterval(this.monitorInterval);
+    this.monitorInterval = setInterval(() => {
+      const tel = this.hologramSerial.telemetry();
+      if (tel) {
+        this.hologramMotorRunning.set(tel.state === 'RUNNING');
+        this.hologramRPM.set(Math.round(tel.rpmReal));
+      }
+    }, 100);
+  }
 
   async ngAfterViewInit(): Promise<void> {
     const feedEl = this.cameraFeed();
@@ -40,15 +69,22 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
       await this.gestureRecognizer.initialize(feedEl.nativeElement);
       this.isLoading.set(false);
 
-      this.subscription = this.gestureRecognizer.gesture$.subscribe((gestureId) => {
-        if (gestureId !== 'none') this.detectedGesture.set(gestureId);
+      const sub = this.gestureRecognizer.gesture$.subscribe((gestureId) => {
         if (gestureId === 'none') return;
+        this.detectedGesture.set(gestureId);
+
         const gesture = GESTURE_CONFIG.find((g) => g.id === gestureId);
-        if (gesture) {
-          this.currentVideoSrc.set(gesture.video);
-          this.isDefaultVideo.set(false);
+        if (!gesture) return;
+
+        this.currentVideoSrc.set(gesture.video);
+        this.isDefaultVideo.set(false);
+
+        if (this.lastCommandedGesture !== gesture.id) {
+          this.lastCommandedGesture = gesture.id;
+          this.hologramSerial.sendCommand(gesture.hologramCommand);
         }
       });
+      this.subscriptions.push(sub);
     } catch {
       this.isLoading.set(false);
       this.cameraError.set('No se pudo acceder a la cámara. Verifica los permisos.');
@@ -58,10 +94,13 @@ export class GestureDetectionComponent implements AfterViewInit, OnDestroy {
   onGestureVideoEnded(): void {
     this.currentVideoSrc.set(DEFAULT_VIDEO);
     this.isDefaultVideo.set(true);
+    this.lastCommandedGesture = null;
+    this.hologramSerial.sendCommand(DEFAULT_HOLOGRAM_COMMAND);
   }
 
   ngOnDestroy(): void {
-    this.subscription?.unsubscribe();
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    if (this.monitorInterval) clearInterval(this.monitorInterval);
     this.gestureRecognizer.stop();
   }
 }

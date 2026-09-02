@@ -82,6 +82,48 @@
   }
 }
 
+.hologram-status {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 20;
+  font-family: system-ui, sans-serif;
+}
+
+.hologram-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+}
+
+.hologram-badge.connected {
+  background: rgba(34, 139, 34, 0.75);
+}
+
+.hologram-badge.unsupported {
+  background: rgba(0, 0, 0, 0.5);
+  color: #ccc;
+}
+
+.hologram-connect-btn {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: none;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.hologram-connect-btn:hover {
+  background: #eee;
+}
+
 .gesture-badge {
   position: absolute;
   bottom: 0.75rem;
@@ -95,6 +137,31 @@
   border-radius: 999px;
   pointer-events: none;
   white-space: nowrap;
+}
+
+.hologram-connected {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.motor-status {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.motor-running {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.motor-stopped {
+  color: #a3a3a3;
 }
 
 /* En móvil apilamos verticalmente: cámara arriba, video abajo */
