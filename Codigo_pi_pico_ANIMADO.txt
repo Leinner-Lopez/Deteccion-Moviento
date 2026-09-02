@@ -1,0 +1,154 @@
+/*
+ * ============================================================================
+ *  CONTROLADOR DC TB6612FNG + RP2040-ZERO + WS2812B - VERSIÓN ANIMADA
+ *  Patrones LED con animaciones fluidas sincronizadas con rotación real
+ *  Basado en v3.0 - Open Loop con Supervisión y Telemetría
+ * ============================================================================
+ */
+
+// NOTA: Este archivo es una EXTENSIÓN del "Codigo pi pico.txt" v3.0
+// Solo muestra las modificaciones en loop1() para animaciones
+
+// ============ PATRONES ANIMADOS (loop1 modifications) ============
+
+// Animación de pulsación para anillos
+void animateRingsPulse(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Pulsación: los anillos se hacen más brillantes y oscuros
+    // animationPhase: 0-255 controlado por tiempo
+    uint8_t brightness = 150 + (int8_t)((sin(animationPhase * PI / 255.0f) * 100));
+    brightness = constrain(brightness, 50, 255);
+
+    if (sector == 0) {
+        strip.fill(strip.Color(255, 255, 255), 0, n);
+        return;
+    }
+
+    for (uint16_t i = 0; i < n; i++) {
+        bool on = ((((uint32_t)i * 8) / n) % 2) == 0;
+        if (on) {
+            // Cian pulsante: (0, 200, 255) con brightness variable
+            uint8_t g = (uint8_t)((200 * brightness) / 255);
+            uint8_t b = (uint8_t)((255 * brightness) / 255);
+            strip.setPixelColor(i, strip.Color(0, g, b));
+        } else {
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// Animación de rotación para aspas
+void spokeRotating(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Las aspas rotan suavemente en el espacio
+    // El offset se suma al sector para crear efecto de rotación
+    uint16_t armPeriod = POV_SECTORS / 6;
+    if (armPeriod == 0) armPeriod = 1;
+
+    // Offset de rotación basado en fase de animación
+    uint16_t rotationOffset = (animationPhase * POV_SECTORS) / 256;
+    uint16_t rotatedSector = (sector + rotationOffset) % POV_SECTORS;
+
+    bool arm = (rotatedSector % armPeriod) < (armPeriod / 2 + 1);
+    uint32_t c = arm ? strip.Color(255, 40, 0) : 0;
+    strip.fill(c, 0, n);
+}
+
+// Animación mejorada para espiral (ya animada, pero con colores vibrantes)
+void spiralVibrant(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    // Espiral violeta con colores que varían dinámicamente
+    uint8_t colorShift = (uint8_t)(animationPhase);
+
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t phase =
+            (uint16_t)((sector * 3 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
+        bool on = phase < (POV_SECTORS / 4);
+
+        if (on) {
+            // Espiral con cambio de color dinámico
+            uint8_t r = 140 + (int8_t)((sin((phase + colorShift) * PI / 128.0f) * 30));
+            uint8_t b = 255 + (int8_t)((cos((phase + colorShift) * PI / 128.0f) * 50));
+            r = constrain(r, 0, 255);
+            b = constrain(b, 0, 255);
+            strip.setPixelColor(i, strip.Color(r, 0, b));
+        } else {
+            strip.setPixelColor(i, 0);
+        }
+    }
+}
+
+// Rainbow mejorado con efectos adicionales
+void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    static uint16_t drift = 0;
+    drift += (uint16_t)(g_ledSpeed >> 2);
+
+    // Añade un efecto de "breath" (respiración) al brillo
+    uint8_t breathEffect = 150 + (int8_t)((sin(animationPhase * PI / 256.0f) * 50));
+
+    uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t hue = base + (uint16_t)(((uint32_t)i * 8192UL) / n);
+        uint32_t color = strip.ColorHSV(hue);
+
+        // Aplicar efecto de respiración al color
+        strip.setPixelColor(i, strip.gamma32(color));
+    }
+}
+
+// ============ MODIFICAR loop1() CON ANIMACIONES ============
+// Reemplaza la función loop1() existente por esta:
+
+uint32_t animationPhaseCounter = 0;
+
+void loop1() {
+    if (g_ledCountDirty) {
+        g_ledCountDirty = false;
+        strip.clear();
+        strip.show();
+    }
+
+    if (!g_ledsEnabled) {
+        strip.clear();
+        strip.show();
+        delay(50);
+        return;
+    }
+
+    uint8_t pattern = g_ledPattern;
+    uint16_t n = g_ledCount;
+
+    // Incrementar fase de animación (0-255 cíclico)
+    animationPhaseCounter = (animationPhaseCounter + 2) % 256;
+
+    if (pattern == PATTERN_SOLID) {
+        strip.fill(strip.Color(g_ledR, g_ledG, g_ledB), 0, n);
+        strip.show();
+        delay(20);
+        return;
+    }
+
+    // Sin delay: el ritmo lo impone strip.show() (~30 us por LED).
+    uint16_t sector = povCurrentSector();
+    g_povSector = sector;
+
+    // Renderizar con animación según el patrón
+    switch (pattern) {
+        case PATTERN_RINGS:
+            animateRingsPulse(sector, n, animationPhaseCounter);
+            break;
+        case PATTERN_SPOKES:
+            spokeRotating(sector, n, animationPhaseCounter);
+            break;
+        case PATTERN_SPIRAL:
+            spiralVibrant(sector, n, animationPhaseCounter);
+            break;
+        case PATTERN_RAINBOW:
+        default:
+            rainbowAdvanced(sector, n, animationPhaseCounter);
+            break;
+    }
+
+    strip.show();
+}
+
+// ============ NOTA: NO CAMBIAR RESTO DEL CÓDIGO ============
+// Copiar el resto del archivo "Codigo pi pico.txt" (setup, setup1, setup, loop, etc.)
+// Esta extensión SOLO modifica loop1() para agregar animaciones

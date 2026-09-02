@@ -350,9 +350,8 @@ void printHelp() {
     Serial.println("DIR CW|CCW     Sentido (solo en IDLE)");
     Serial.println("LEDS ON|OFF    Control tira LED");
     Serial.println("LEDSPEED <n>   Deriva del arcoiris 0..255");
-    Serial.println("PATTERN <n>    Patrones POV:");
-    Serial.println("  0=Arcoiris  1=Anillos  2=Aspas  3=Espiral");
-    Serial.println("  4=Mano     5=Corriendo  6=Latido  7=Strobe");
+    Serial.println("PATTERN <n>    Patrones POV dinamicos:");
+    Serial.println("  0=Arcoiris  1=Mano  2=Corriendo  3=Latido");
     Serial.println("LEDCOLOR <r> <g> <b>  Color fijo sin POV (prueba)");
     Serial.println("LEDCOUNT <n>   Cantidad real de LEDs 1..100");
     Serial.println("HBT            Heartbeat (cada <500ms)");
@@ -480,9 +479,9 @@ void processCommand(const char* cmd) {
     }
     else if (strcmp(token, "PATTERN") == 0) {
         // PATTERN <n> -> figura POV que selecciona el gesto desde la web
-        // 0=RAINBOW, 1=RINGS, 2=SPOKES, 3=SPIRAL, 4=WAVE, 5=RUNNER, 6=HEARTBEAT, 7=STROBE
+        // 0=RAINBOW, 1=WAVE, 2=RUNNER, 3=HEARTBEAT
         if (arg != NULL) {
-            int p = constrain(atoi(arg), 0, 7);
+            int p = constrain(atoi(arg), 0, 3);
             g_ledPattern = (uint8_t)p;
             g_ledsEnabled = true;
         }
@@ -618,163 +617,8 @@ uint8_t sineToUint8(float sineValue) {
     return result;
 }
 
-// ANIMACIÓN 1: Anillos con pulsación y desvanecimiento (PATTERN 1)
-void animateRingsPulse(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    // Pulsación más fuerte y visible
-    float phase = (float)animationPhase * 3.14159265f / 128.0f;  // Más rápido
-    float sineValue = sin(phase);
-    uint8_t brightness = sineToUint8(sineValue);
-    brightness = map(brightness, 0, 255, 50, 255);  // Más rango
-
-    // Anillos concéntricos que cambian de color
-    uint8_t colorPhase = (animationPhase / 2) % 3;
-
-    if (sector == 0) {
-        strip.fill(strip.Color(255, 255, 255), 0, n);
-        return;
-    }
-
-    for (uint16_t i = 0; i < n; i++) {
-        // Crear múltiples anillos
-        uint16_t ringPos = (i * 16) / n;
-        bool on = (ringPos % 4) < 2;
-
-        if (on) {
-            uint8_t r = 0;
-            uint8_t g = brightness;
-            uint8_t b = brightness;
-
-            // Cambiar color entre cian -> verde -> azul
-            if (colorPhase == 1) {
-                g = brightness;
-                b = brightness / 2;
-            } else if (colorPhase == 2) {
-                g = brightness / 2;
-                b = brightness;
-            }
-
-            strip.setPixelColor(i, strip.Color(r, g, b));
-        } else {
-            // LEDs oscuros crean contraste
-            strip.setPixelColor(i, strip.Color(0, brightness / 4, brightness / 4));
-        }
-    }
-}
-
-// ANIMACIÓN 2: Aspas rotantes con gradiente y brillo (PATTERN 2)
-void spokeRotating(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    uint16_t armPeriod = POV_SECTORS / 6;
-    if (armPeriod == 0) armPeriod = 1;
-
-    // Rotación más rápida y suave
-    uint16_t rotationOffset = (animationPhase * POV_SECTORS) / 128;
-    uint16_t rotatedSector = (sector + rotationOffset) % POV_SECTORS;
-
-    // Calcular distancia desde el centro del aspa
-    uint16_t distFromArm = rotatedSector % armPeriod;
-    uint16_t armCenter = armPeriod / 2;
-
-    // Brillo gradual (más brillante en el centro, oscuro en bordes)
-    uint8_t armBrightness = 0;
-    if (distFromArm <= armCenter) {
-        armBrightness = (255 * (armCenter - distFromArm)) / (armCenter + 1);
-    } else {
-        armBrightness = (255 * (distFromArm - armCenter)) / (armCenter + 1);
-    }
-
-    for (uint16_t i = 0; i < n; i++) {
-        // Crear gradiente radial en los LEDs
-        uint8_t ledBrightness = (armBrightness * i) / n;
-
-        uint8_t r = ledBrightness;
-        uint8_t g = ledBrightness / 2;
-        uint8_t b = 0;
-
-        strip.setPixelColor(i, strip.Color(r, g, b));
-    }
-}
-
-// ANIMACIÓN 3: Espiral hipnotizante con múltiples colores (PATTERN 3)
-void spiralVibrant(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    uint8_t colorShift = (uint8_t)(animationPhase / 2);
-
-    for (uint16_t i = 0; i < n; i++) {
-        // Tres espirales entrelazadas para más movimiento
-        uint16_t phase1 = (uint16_t)((sector * 2 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
-        uint16_t phase2 = (uint16_t)((sector * 4 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
-        uint16_t phase3 = (uint16_t)((sector * 6 + ((uint32_t)i * POV_SECTORS) / n) % POV_SECTORS);
-
-        bool spiral1 = phase1 < (POV_SECTORS / 6);
-        bool spiral2 = phase2 < (POV_SECTORS / 6);
-        bool spiral3 = phase3 < (POV_SECTORS / 6);
-
-        uint8_t r = 0, g = 0, b = 0;
-
-        if (spiral1) {
-            // Púrpura
-            float sine1 = sin((float)(phase1 + colorShift) * 3.14159265f / 64.0f);
-            r = 200 + (int8_t)(sine1 * 55);
-            b = 255 + (int8_t)(sine1 * 20);
-        }
-
-        if (spiral2) {
-            // Cian
-            float sine2 = sin((float)(phase2 + colorShift) * 3.14159265f / 64.0f);
-            g = 180 + (int8_t)(sine2 * 75);
-            b = 255 + (int8_t)(sine2 * 30);
-        }
-
-        if (spiral3) {
-            // Verde/Lime
-            float sine3 = sin((float)(phase3 + colorShift) * 3.14159265f / 64.0f);
-            g = 200 + (int8_t)(sine3 * 55);
-            r = 100 + (int8_t)(sine3 * 40);
-        }
-
-        r = constrain(r, 0, 255);
-        g = constrain(g, 0, 255);
-        b = constrain(b, 0, 255);
-
-        strip.setPixelColor(i, strip.Color(r, g, b));
-    }
-}
-
-// ANIMACIÓN 4: Rainbow mega-dinámico con efecto pulsante (PATTERN 0)
-void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    static uint16_t drift = 0;
-    drift += (uint16_t)(g_ledSpeed >> 1);  // Drift más rápido
-
-    // Efecto de "respiración" del brillo
-    float breathPhase = (float)animationPhase * 3.14159265f / 256.0f;
-    uint8_t breathBrightness = 200 + (int8_t)(sin(breathPhase) * 55);
-
-    uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
-
-    for (uint16_t i = 0; i < n; i++) {
-        // Hue base con desplazamiento por LED
-        uint16_t hue = base + (uint16_t)(((uint32_t)i * 16384UL) / n);  // Mayor desplazamiento
-
-        // Obtener color HSV
-        uint32_t color = strip.ColorHSV(hue, 255, breathBrightness);
-
-        // Agregar variación radial (más brillante en el centro)
-        uint8_t brightness = (breathBrightness * i) / (n * 2) + (breathBrightness / 2);
-        brightness = constrain(brightness, 0, 255);
-
-        // Mezclar con el color base
-        strip.setPixelColor(i, strip.gamma32(color));
-    }
-
-    // Crear efecto de "onda" pulsante cada sector
-    if ((animationPhase % 16) < 8) {
-        for (uint16_t i = 0; i < n / 4; i++) {
-            strip.setPixelColor(i, strip.Color(255, 255, 255));
-        }
-    }
-}
-
-// ANIMACIÓN 5: Mano saludando (PATTERN 4)
-void animateWave(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+// ANIMACIÓN 1: Mano saludando (PATTERN 1)
+void patternWave(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     // Mano saludando de lado a lado
     float wavePhase = (float)animationPhase * 3.14159265f / 64.0f;
     uint16_t handPos = n / 2 + (int16_t)(sin(wavePhase) * n / 3);
@@ -804,8 +648,8 @@ void animateWave(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     }
 }
 
-// ANIMACIÓN 6: Persona corriendo (PATTERN 5)
-void animateRunner(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+// ANIMACIÓN 2: Persona corriendo (PATTERN 2)
+void patternRunner(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     // Figura corriendo: dos "piernas" que se mueven alternadamente
     uint8_t runPos = (animationPhase / 3) % n;
     uint8_t speed = 8;
@@ -837,8 +681,8 @@ void animateRunner(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     }
 }
 
-// ANIMACIÓN 7: Pulso cardiaco (PATTERN 6)
-void animateHeartbeat(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+// ANIMACIÓN 3: Pulso cardiaco (PATTERN 3)
+void patternHeartbeat(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     // Patrón de latido cardiaco: DOS pulsos seguidos, luego pausa
     uint8_t beatPhase = animationPhase % 80;
 
@@ -878,25 +722,40 @@ void animateHeartbeat(uint16_t sector, uint16_t n, uint32_t animationPhase) {
     }
 }
 
-// ANIMACIÓN 8: Strobe/Flash (PATTERN 7)
-void animateStrobe(uint16_t sector, uint16_t n, uint32_t animationPhase) {
-    // Flash estroboscópico sincronizado
-    uint8_t flashPhase = animationPhase % 32;
+// ANIMACIÓN 4: Rainbow mega-dinámico con efecto pulsante (PATTERN 0)
+void rainbowAdvanced(uint16_t sector, uint16_t n, uint32_t animationPhase) {
+    static uint16_t drift = 0;
+    drift += (uint16_t)(g_ledSpeed >> 1);  // Drift más rápido
 
-    if (flashPhase < 4) {
-        // Flash blanco rápido
-        strip.fill(strip.Color(255, 255, 255), 0, n);
-    } else if (flashPhase < 8) {
-        // Pausa corta
-        strip.fill(strip.Color(0, 0, 0), 0, n);
-    } else if (flashPhase < 12) {
-        // Segundo flash
-        strip.fill(strip.Color(255, 100, 255), 0, n);  // Magenta
-    } else {
-        // Pausa larga
-        strip.fill(strip.Color(0, 0, 0), 0, n);
+    // Efecto de "respiración" del brillo
+    float breathPhase = (float)animationPhase * 3.14159265f / 256.0f;
+    uint8_t breathBrightness = 200 + (int8_t)(sin(breathPhase) * 55);
+
+    uint16_t base = (uint16_t)(((uint32_t)sector * 65535UL) / POV_SECTORS) + drift;
+
+    for (uint16_t i = 0; i < n; i++) {
+        // Hue base con desplazamiento por LED
+        uint16_t hue = base + (uint16_t)(((uint32_t)i * 16384UL) / n);  // Mayor desplazamiento
+
+        // Obtener color HSV
+        uint32_t color = strip.ColorHSV(hue, 255, breathBrightness);
+
+        // Agregar variación radial (más brillante en el centro)
+        uint8_t brightness = (breathBrightness * i) / (n * 2) + (breathBrightness / 2);
+        brightness = constrain(brightness, 0, 255);
+
+        // Mezclar con el color base
+        strip.setPixelColor(i, strip.gamma32(color));
+    }
+
+    // Crear efecto de "onda" pulsante cada sector
+    if ((animationPhase % 16) < 8) {
+        for (uint16_t i = 0; i < n / 4; i++) {
+            strip.setPixelColor(i, strip.Color(255, 255, 255));
+        }
     }
 }
+
 
 void setup1() {
     strip.begin();
@@ -969,35 +828,19 @@ void loop1() {
 
     // Renderizar patrón con animación
     switch (pattern) {
-        case PATTERN_RINGS:
-            animateRingsPulse(sector, n, animationPhaseCounter);
+        case PATTERN_RINGS:  // 1 - Mano saludando
+            patternWave(sector, n, animationPhaseCounter);
             break;
 
-        case PATTERN_SPOKES:
-            spokeRotating(sector, n, animationPhaseCounter);
+        case PATTERN_SPOKES:  // 2 - Persona corriendo
+            patternRunner(sector, n, animationPhaseCounter);
             break;
 
-        case PATTERN_SPIRAL:
-            spiralVibrant(sector, n, animationPhaseCounter);
+        case PATTERN_SPIRAL:  // 3 - Latido cardiaco
+            patternHeartbeat(sector, n, animationPhaseCounter);
             break;
 
-        case 4:  // WAVE - Mano saludando
-            animateWave(sector, n, animationPhaseCounter);
-            break;
-
-        case 5:  // RUNNER - Persona corriendo
-            animateRunner(sector, n, animationPhaseCounter);
-            break;
-
-        case 6:  // HEARTBEAT - Pulso cardiaco
-            animateHeartbeat(sector, n, animationPhaseCounter);
-            break;
-
-        case 7:  // STROBE - Flash estroboscópico
-            animateStrobe(sector, n, animationPhaseCounter);
-            break;
-
-        case PATTERN_RAINBOW:
+        case PATTERN_RAINBOW:  // 0 - Arcoíris
         default:
             rainbowAdvanced(sector, n, animationPhaseCounter);
             break;
